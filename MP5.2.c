@@ -6,7 +6,7 @@
 
 #include <wb.h>
 
-#define BLOCK_SIZE 128 //@@ You can change this
+#define BLOCK_SIZE 512 //@@ You can change this
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
@@ -69,6 +69,8 @@ __global__ void scan(float *input, float *output, int len) {
     T[t + BLOCK_SIZE] = 0;
   }
   
+  __syncthreads();
+  
   /*Reduce kernel*/
   int stride = 1;
   while (stride < 2 * BLOCK_SIZE) {
@@ -90,21 +92,31 @@ __global__ void scan(float *input, float *output, int len) {
     if (index + stride < 2 * BLOCK_SIZE) {
       T[index + stride] += T[index];
     }
-    stride /= 2;    
+    stride /= 2;
   }
   
-  if (t + start < len) {
-    output[t + start] = T[t];
+  __syncthreads();
+  
+  __shared__ float add;
+  
+  if (t == 0) {
     if (blockIdx.x > 0) {
-      output[t + start] += output[start - 1];
+      add = output[start - 1];
     }
+    else {
+      add = 0;
+    }
+  }
+  
+  
+  if (t + start < len) {
+    output[t + start] = T[t] + add;
   }
   if (t + start + BLOCK_SIZE < len) {
-    output[t + start + BLOCK_SIZE] = T[t + BLOCK_SIZE];
-    if (blockIdx.x > 0) {
-      output[t + start + BLOCK_SIZE] += output[start - 1]; 
-    }
+    output[t + start + BLOCK_SIZE] = T[t + BLOCK_SIZE] + add;
   }
+  
+  __syncthreads();
 }
 
 int main(int argc, char **argv) {
@@ -140,8 +152,8 @@ int main(int argc, char **argv) {
   wbTime_stop(GPU, "Copying input memory to the GPU.");
 
   //@@ Initialize the grid and block dimensions here
-  dim3 dimGrid = (ceil(numElements / (1.0 * BLOCK_SIZE)), 1, 1);
-  dim3 dimBlock = ((BLOCK_SIZE * 1), 1, 1);
+  dim3 dimGrid(ceil(numElements / (1.0 * BLOCK_SIZE)), 1, 1);
+  dim3 dimBlock((BLOCK_SIZE * 1), 1, 1);
   
   wbTime_start(Compute, "Performing CUDA computation");
   //@@ Modify this to complete the functionality of the scan
