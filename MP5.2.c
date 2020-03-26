@@ -6,7 +6,7 @@
 
 #include <wb.h>
 
-#define BLOCK_SIZE 1024 //@@ You can change this
+#define BLOCK_SIZE 64 //@@ You can change this
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
@@ -17,35 +17,6 @@
       return -1;                                                          \
     }                                                                     \
   } while (0)
-
-/*
-/* Helper function for the reduction step kerel
-void redKernel(float* T, unsigned int t) {
-  int stride = 1;
-  while (stride < 2 * BLOCK_SIZE) {
-    int index = (t + 1) * stride * 2 - 1;
-    if (index < 2 * BLOCK_SIZE && (index - stride) >= 0) {
-      T[index] += T[index - stride];
-    }
-    stride *= 2;
-    
-    __syncthreads();
-  }
-}
-/*Helper function for the post scan step
-void postScan(float* T, unsigned int t) {
-  int stride = BLOCK_SIZE / 2;
-  while (stride > 0) {
-    __syncthreads();
-    
-    int index = (t + 1) * stride * 2 - 1;
-    if (index + stride < 2 * BLOCK_SIZE) {
-      T[index + stride] += T[index];
-    }
-    stride /= 2;    
-  }
-}
-*/
 
 /*Kernel 1 & 2: scan*/
 __global__ void scan(float *input, float *output, bool auxiArr, int len) {
@@ -65,8 +36,9 @@ __global__ void scan(float *input, float *output, bool auxiArr, int len) {
   }
   else {
     ldX = (t + 1) * BLOCK_SIZE * 2 - 1; //See the "index" variable below
-    ldStride = blockDim.x * 2;
+    ldStride = blockDim.x * BLOCK_SIZE * 2;
   }
+  
   
   if (ldX < len) {
     T[t] = input[ldX];
@@ -131,9 +103,11 @@ __global__ void scan(float *input, float *output, bool auxiArr, int len) {
   }
   
   __syncthreads();
+  
 }
 
 /*Kernel 3: add*/
+
 __global__ void add(float* deviceScanSums, float* deviceAuxiArr, float* deviceOutput, int numElements){
   unsigned int t = threadIdx.x;
   unsigned int start = blockIdx.x * BLOCK_SIZE * 2;
@@ -155,6 +129,7 @@ __global__ void add(float* deviceScanSums, float* deviceAuxiArr, float* deviceOu
   }
   
 }
+
 
 int main(int argc, char **argv) {
   wbArg_t args;
@@ -194,7 +169,7 @@ int main(int argc, char **argv) {
   wbTime_stop(GPU, "Copying input memory to the GPU.");
 
   //@@ Initialize the grid and block dimensions here
-  dim3 dimGrid(ceil(numElements / (1.0 * BLOCK_SIZE)), 1, 1);
+  dim3 dimGrid(ceil(numElements / (2.0 * BLOCK_SIZE)), 1, 1);
   dim3 dimAuxiGrid(1, 1, 1);
   dim3 dimBlock((BLOCK_SIZE * 1), 1, 1);
   
