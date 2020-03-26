@@ -6,7 +6,7 @@
 
 #include <wb.h>
 
-#define BLOCK_SIZE 512 //@@ You can change this
+#define BLOCK_SIZE 1024 //@@ You can change this
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
@@ -47,7 +47,8 @@ void postScan(float* T, unsigned int t) {
 }
 */
 
-__global__ void scan(float *input, float *output, int len) {
+/*Kernel 1 & 2: scan*/
+__global__ void scan(float *input, float *output, bool auxiArr, int len) {
   //@@ Modify the body of this function to complete the functionality of
   //@@ the scan on the device
   //@@ You may need multiple kernel calls; write your kernels before this
@@ -55,14 +56,26 @@ __global__ void scan(float *input, float *output, int len) {
   __shared__ float T[2 * BLOCK_SIZE];
   unsigned int t = threadIdx.x;
   unsigned int start = 2 * blockIdx.x * blockDim.x;
-  if (t + start < len) {
-    T[t] = input[t + start];
+  unsigned int ldX;
+  unsigned int ldStride;
+  
+  if (!auxiArr) {
+    ldX = t + start;
+    ldStride = blockDim.x;
+  }
+  else {
+    ldX = (t + 1) * BLOCK_SIZE * 2 - 1; //See the "index" variable below
+    ldStride = blockDim.x * 2;
+  }
+  
+  if (ldX < len) {
+    T[t] = input[ldX];
   }
   else {
     T[t] = 0;
   }
-  if (t + start + BLOCK_SIZE < len) {
-    T[t + BLOCK_SIZE] = input[t + start + BLOCK_SIZE];
+  if (ldX + BLOCK_SIZE < len) {
+    T[t + BLOCK_SIZE] = input[ldX + ldStride];
   }
   else {
     T[t + BLOCK_SIZE] = 0;
@@ -120,6 +133,29 @@ __global__ void scan(float *input, float *output, int len) {
   __syncthreads();
 }
 
+/*Kernel 3: add*/
+__global__ void add(float* deviceScanSums, float* deviceAuxiArr, float* deviceOutput, int numElements){
+  unsigned int t = threadIdx.x;
+  unsigned int start = blockIdx.x * BLOCK_SIZE * 2;
+  
+  __shared__ float temp;
+  if (t == 0) {
+    temp = 0;
+    if (blockIdx.x > 0) {
+      temp = deviceScanSums[blockIdx.x - 1];
+    }
+  }
+  __syncthreads();
+  
+  if (t + start < numElements) {
+    deviceOutput[t + start] = deviceAuxiArr[t + start] + temp;
+  }
+  if (t + start + BLOCK_SIZE < numElements) {
+    deviceOutput[t + start + BLOCK_SIZE] = deviceAuxiArr[t + start + BLOCK_SIZE] + temp;
+  }
+  
+}
+
 int main(int argc, char **argv) {
   wbArg_t args;
   float *hostInput;  // The input 1D list
@@ -127,6 +163,9 @@ int main(int argc, char **argv) {
   float *deviceInput;
   float *deviceOutput;
   int numElements; // number of elements in the list
+  
+  float* deviceAuxiArr; // The auxiliary added by Ying
+  float* deviceScanSums; // The scan block sums added by Ying
 
   args = wbArg_read(argc, argv);
 
@@ -141,6 +180,8 @@ int main(int argc, char **argv) {
   wbTime_start(GPU, "Allocating GPU memory.");
   wbCheck(cudaMalloc((void **)&deviceInput, numElements * sizeof(float)));
   wbCheck(cudaMalloc((void **)&deviceOutput, numElements * sizeof(float)));
+  wbCheck(cudaMalloc((void**)&deviceAuxiArr, numElements * sizeof(float)));
+  wbCheck(cudaMalloc((void**)&deviceScanSums, ceil(numElements / BLOCK_SIZE) * sizeof(float)));
   wbTime_stop(GPU, "Allocating GPU memory.");
 
   wbTime_start(GPU, "Clearing output memory.");
@@ -154,11 +195,13 @@ int main(int argc, char **argv) {
 
   //@@ Initialize the grid and block dimensions here
   dim3 dimGrid(ceil(numElements / (1.0 * BLOCK_SIZE)), 1, 1);
+  dim3 dimAuxiGrid(1, 1, 1);
   dim3 dimBlock((BLOCK_SIZE * 1), 1, 1);
   
   wbTime_start(Compute, "Performing CUDA computation");
   //@@ Modify this to complete the functionality of the scan
   //@@ on the deivce
+  /*
   for(int i = 0; i < ceil(numElements / (1.0 * BLOCK_SIZE)); ++i) {
     int bIdx = i * BLOCK_SIZE;
     
@@ -171,8 +214,15 @@ int main(int argc, char **argv) {
     
     scan<<<dimGrid, dimBlock>>>(&deviceInput[bIdx], &deviceOutput[bIdx], (numElements - bIdx));
   }
-
+  */
+  
+  scan<<<dimGrid, dimBlock>>>(deviceInput, deviceAuxiArr, false, numElements);
   cudaDeviceSynchronize();
+  scan<<<dimAuxiGrid, dimBlock>>>(deviceAuxiArr, deviceScanSums, true, numElements);
+  cudaDeviceSynchronize();
+  add<<<dimGrid, dimBlock>>>(deviceScanSums, deviceAuxiArr, deviceOutput, numElements);
+  cudaDeviceSynchronize();
+  
   wbTime_stop(Compute, "Performing CUDA computation");
 
   wbTime_start(Copy, "Copying output memory to the CPU");
