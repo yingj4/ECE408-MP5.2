@@ -6,7 +6,7 @@
 
 #include <wb.h>
 
-#define BLOCK_SIZE 64 //@@ You can change this
+#define BLOCK_SIZE 128 //@@ You can change this
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
@@ -18,8 +18,9 @@
     }                                                                     \
   } while (0)
 
-/* Helper function for the reduction step kerel*/
-__global__ void redKernel(float* T, unsigned int t) {
+/*
+/* Helper function for the reduction step kerel
+void redKernel(float* T, unsigned int t) {
   int stride = 1;
   while (stride < 2 * BLOCK_SIZE) {
     int index = (t + 1) * stride * 2 - 1;
@@ -32,8 +33,8 @@ __global__ void redKernel(float* T, unsigned int t) {
   }
 }
 
-/*Helper function for the post scan step*/
-__global__ void postScan(float* T, unsigned int t) {
+/*Helper function for the post scan step
+void postScan(float* T, unsigned int t) {
   int stride = BLOCK_SIZE / 2;
   while (stride > 0) {
     __syncthreads();
@@ -45,6 +46,7 @@ __global__ void postScan(float* T, unsigned int t) {
     stride /= 2;    
   }
 }
+*/
 
 __global__ void scan(float *input, float *output, int len) {
   //@@ Modify the body of this function to complete the functionality of
@@ -53,16 +55,56 @@ __global__ void scan(float *input, float *output, int len) {
   //@@ function and call them from the host
   __shared__ float T[2 * BLOCK_SIZE];
   unsigned int t = threadIdx.x;
-  unsigned int start = 2 * blockIdx.x * BLOCK_SIZE;
+  unsigned int start = 2 * blockIdx.x * blockDim.x;
   if (t + start < len) {
-    T[t] = input[start + t];
+    T[t] = input[t + start];
   }
   else {
     T[t] = 0;
   }
+  if (t + start + BLOCK_SIZE < len) {
+    T[t + BLOCK_SIZE] = input[t + start + BLOCK_SIZE];
+  }
+  else {
+    T[t + BLOCK_SIZE] = 0;
+  }
   
-  redKernel(T, t);
-  postScan(T, t);
+  /*Reduce kernel*/
+  int stride = 1;
+  while (stride < 2 * BLOCK_SIZE) {
+    int index = (t + 1) * stride * 2 - 1;
+    if (index < 2 * BLOCK_SIZE && (index - stride) >= 0) {
+      T[index] += T[index - stride];
+    }
+    stride *= 2;
+    
+    __syncthreads();
+  }
+  
+  /*Post scan*/
+  stride = BLOCK_SIZE / 2;
+  while (stride > 0) {
+    __syncthreads();
+    
+    int index = (t + 1) * stride * 2 - 1;
+    if (index + stride < 2 * BLOCK_SIZE) {
+      T[index + stride] += T[index];
+    }
+    stride /= 2;    
+  }
+  
+  if (t + start < len) {
+    output[t + start] = T[t];
+    if (blockIdx.x > 0) {
+      output[t + start] += output[start - 1];
+    }
+  }
+  if (t + start + BLOCK_SIZE < len) {
+    output[t + start + BLOCK_SIZE] = T[t + BLOCK_SIZE];
+    if (blockIdx.x > 0) {
+      output[t + start + BLOCK_SIZE] += output[start - 1]; 
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -98,12 +140,13 @@ int main(int argc, char **argv) {
   wbTime_stop(GPU, "Copying input memory to the GPU.");
 
   //@@ Initialize the grid and block dimensions here
-  dim3 dimGrid = (ceil(numElements / (2.0 * BLOCK_SIZE)), 1, 1);
-  dim3 dimBlock = (2 * BLOCK_SIZE, 1, 1);
+  dim3 dimGrid = (ceil(numElements / (1.0 * BLOCK_SIZE)), 1, 1);
+  dim3 dimBlock = ((BLOCK_SIZE * 1), 1, 1);
   
   wbTime_start(Compute, "Performing CUDA computation");
   //@@ Modify this to complete the functionality of the scan
   //@@ on the deivce
+  scan<<<dimGrid, dimBlock>>>(deviceInput, deviceOutput, numElements);
 
   cudaDeviceSynchronize();
   wbTime_stop(Compute, "Performing CUDA computation");
