@@ -32,7 +32,6 @@ void redKernel(float* T, unsigned int t) {
     __syncthreads();
   }
 }
-
 /*Helper function for the post scan step
 void postScan(float* T, unsigned int t) {
   int stride = BLOCK_SIZE / 2;
@@ -97,6 +96,7 @@ __global__ void scan(float *input, float *output, int len) {
   
   __syncthreads();
   
+  /*
   __shared__ float add;
   
   if (t == 0) {
@@ -107,13 +107,14 @@ __global__ void scan(float *input, float *output, int len) {
       add = 0;
     }
   }
+  */
   
   
   if (t + start < len) {
-    output[t + start] = T[t] + add;
+    output[t + start] = T[t];
   }
   if (t + start + BLOCK_SIZE < len) {
-    output[t + start + BLOCK_SIZE] = T[t + BLOCK_SIZE] + add;
+    output[t + start + BLOCK_SIZE] = T[t + BLOCK_SIZE];
   }
   
   __syncthreads();
@@ -158,7 +159,18 @@ int main(int argc, char **argv) {
   wbTime_start(Compute, "Performing CUDA computation");
   //@@ Modify this to complete the functionality of the scan
   //@@ on the deivce
-  scan<<<dimGrid, dimBlock>>>(deviceInput, deviceOutput, numElements);
+  for(int i = 0; i < ceil(numElements / (1.0 * BLOCK_SIZE)); ++i) {
+    int bIdx = i * BLOCK_SIZE;
+    
+    if(i > 0) {
+      float temp = 0;
+      cudaMemcpy(&temp, &deviceOutput[bIdx - 1], sizeof(float), cudaMemcpyDeviceToHost);
+      temp += hostInput[bIdx];
+      cudaMemcpy(&deviceInput[bIdx], &temp, sizeof(float),cudaMemcpyHostToDevice);
+    }
+    
+    scan<<<dimGrid, dimBlock>>>(&deviceInput[bIdx], &deviceOutput[bIdx], (numElements - bIdx));
+  }
 
   cudaDeviceSynchronize();
   wbTime_stop(Compute, "Performing CUDA computation");
