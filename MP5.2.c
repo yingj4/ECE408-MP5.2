@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
   wbCheck(cudaMalloc((void **)&deviceInput, numElements * sizeof(float)));
   wbCheck(cudaMalloc((void **)&deviceOutput, numElements * sizeof(float)));
   wbCheck(cudaMalloc((void**)&deviceAuxiArr, numElements * sizeof(float)));
-  wbCheck(cudaMalloc((void**)&deviceScanSums, (2 * BLOCK_SIZE) * sizeof(float)));
+  wbCheck(cudaMalloc((void**)&deviceScanSums, ceil(numElements / BLOCK_SIZE) * sizeof(float)));
   wbTime_stop(GPU, "Allocating GPU memory.");
 
   wbTime_start(GPU, "Clearing output memory.");
