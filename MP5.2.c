@@ -53,18 +53,17 @@ __global__ void scan(float *input, float *output, bool auxiArr, int len) {
     T[t + BLOCK_SIZE] = 0;
   }
   
-  __syncthreads();
-  
   /*Reduce kernel*/
   int stride = 1;
   while (stride < 2 * BLOCK_SIZE) {
+    __syncthreads();
     int index = (t + 1) * stride * 2 - 1;
     if (index < 2 * BLOCK_SIZE && (index - stride) >= 0) {
       T[index] += T[index - stride];
     }
     stride *= 2;
     
-    __syncthreads();
+    
   }
   
   /*Post scan*/
