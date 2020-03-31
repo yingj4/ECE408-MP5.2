@@ -171,6 +171,7 @@ int main(int argc, char **argv) {
   dim3 dimGrid(ceil(numElements / (2.0 * BLOCK_SIZE)), 1, 1);
   dim3 dimAuxiGrid(1, 1, 1);
   dim3 dimBlock((BLOCK_SIZE * 1), 1, 1);
+  dim3 dimAuxiBlock(ceil(numElements / (2.0 * BLOCK_SIZE)), 1, 1);
   
   wbTime_start(Compute, "Performing CUDA computation");
   //@@ Modify this to complete the functionality of the scan
@@ -192,7 +193,7 @@ int main(int argc, char **argv) {
   
   scan<<<dimGrid, dimBlock>>>(deviceInput, deviceAuxiArr, false, numElements);
   cudaDeviceSynchronize();
-  scan<<<dimAuxiGrid, dimBlock>>>(deviceAuxiArr, deviceScanSums, true, numElements);
+  scan<<<dimAuxiGrid, dimAuxiBlock>>>(deviceAuxiArr, deviceScanSums, true, numElements);
   cudaDeviceSynchronize();
   add<<<dimGrid, dimBlock>>>(deviceScanSums, deviceAuxiArr, deviceOutput, numElements);
   cudaDeviceSynchronize();
